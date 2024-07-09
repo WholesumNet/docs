@@ -1,0 +1,271 @@
+\documentclass[a4paper, 10pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{dcolumn}
+\usepackage{xcolor}
+\usepackage{adjustbox}
+\usepackage{indentfirst}
+\usepackage{adjustbox}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{url}
+\usepackage[colorlinks=true, linkcolor=blue, urlcolor=blue]{hyperref}
+
+\begin{document}
+
+\title{Risc0 Segmentation Test Results}
+\author{
+	{Reza Hasanzadeh} \\
+	\small{\href{https://github.com/WholesumNet}{Wholesum Network}} \\
+	\href{mailto:rezahsnz@proton.me}{\footnotesize{rezahsnz@proton.me}}
+}
+
+\date{ \footnotesize{July 9th, 2024}}
+
+\maketitle
+
+
+\section{Introduction}
+\href{https://www.risczero.com}{Risc0} is a general-purpose zkVM that enables for arbitrary Rust programs to become verifiable. Given an input Rust program, Risc0 compiles it into a RISC-V binary ELF and feeds into its zk-STARK circuitry producing a verifiable execution trace represented by a \textit{guest} program. This guest program, when run, produces proofs that can be used by third-parties to check if the execution was indeed honest. In order to have infinitely-sized programs, Risc0 divides a guest program into \textit{segments} with segment size capped at $2^{24}$ \textit{cycles}\footnote{A \href{https://dev.risczero.com/terminology\#clock-cycles}{cycle} is roughly equivalent to a RISC-V operation.}. If a zkVM program does not fit into $\approx$16m cycles, it needs to be partitioned into segments and proved one by one. Segment size can be customized to lower limits too with the acceptable range starting  at $2^{13}$ cycles. Along with execution steps, each segment size has particular memory requirements shown on Table 1(a comprehensive benchmarking is available \href{https://benchmarks.risczero.com/release-1.0/datasheet}{here}).
+\begin{table}[h!]
+  \begin{center}
+    \small
+    \label{tab:table1}
+    \begin{tabular}{c|c}
+	  \textbf{Segment size} & \textbf{Minimum required memory}\\
+	  \textit{cycles} & \textit{$\approx$ amount}\\
+	  \hline
+	  $2^{13} \approx 8k$  & 64 MB\\
+	  \textcolor{gray}{$2^{14} \approx 16k$} & \textcolor{gray}{128 MB}\\
+      $2^{15} \approx 32k$ & 256 MB\\
+      \textcolor{gray}{$2^{16} \approx 64k$} & \textcolor{gray}{512 MB}\\
+      $2^{17} \approx 128k$ & 1 GB\\
+      \textcolor{gray}{$2^{18} \approx 256k$} & \textcolor{gray}{2 GB}\\
+      $2^{19} \approx 512k$ & 4 GB\\
+      \textcolor{gray}{$2^{20} \approx 1M$} & \textcolor{gray}{8 GB}\\
+      $2^{21} \approx 2M$ & 16 GB\\
+      \textcolor{gray}{$2^{22} \approx 4M$} & \textcolor{gray}{32 GB}\\
+      $2^{23} \approx 8M$ & 64 GB\\
+      \textcolor{gray}{$2^{24} \approx 16M$} & \textcolor{gray}{128 GB}\\
+    \end{tabular}
+    \caption{Memory requirements per segment size}
+  \end{center}
+\end{table}
+\par
+Real-world zkVM programs are often big in size. Next section provides a detailed record of inflating and proving a typical guest program. It measures performance and storage requirements of various segment size limits. 
+
+\section{Segmentation test results}
+In order to emulate a big guest program, a large vector of random u32 numbers were written to the guest memory in each round. While there are more sophisticated inflation methods, this method is easy\footnote{RISC architecture tends to have lower number of instructions, so a cycle representing a load instruction, for example, is not inferior to the one representing a mathematical operation.} and it can be used as a baseline for further experiments. To segment the guest program, we limited its \textit{po2-size-limit} in each round resulting in multiple independent segments per limit size. These segments were then saved as binary blobs to disk for later individual proving. There are 8 rounds of segmentation and proving in total where each round limits the segment size from $2^{15}$ up to $2^{24}$. To measure performance of individual segment proving, a subset of segment blobs were drawn at random(uniform distribution), proved, and the maximum values were recorded. The test computer is a \textit{Lenovo Thinkpad e450(Intel Core i7 5500U(2C 4T), 16GB RAM)} laptop running an \textit{Ubuntu 18.04} dockerized-Risc0-1.0.1 environment.
+\subsection*{Rounds} 
+% 1m
+\par \noindent
+\textbf{Round 1}: up to \textit{1m} cycles\\
+User cycles: \textit{872,543}\\
+Inflation method: write 11k u32 numbers to the guest\\
+The results are displayed on the following table:
+\begin{table}[H]
+  	\begin{center}
+    \label{tab:table2}
+    \begin{minipage}{\textwidth}
+    \begin{adjustbox}{width=\textwidth}
+    \begin{tabular}{c|c|c|c|c|c|c|c|c|c|c}
+	  \textit{Segment size} & $2^{15}$ & $2^{16}$ & $2^{17}$ & $2^{18}$ & $2^{19}$ & $2^{20}$ & $2^{21}$ & $2^{22}$ & $2^{23}$ & $2^{24}$\\
+	  \textit{\# Segments} & 169 & 26 & 10 & 5 & 3 & 1 & - & - & - & -\\
+	  \textit{Total cycles} & 5.5M & 1.7M & 1.3M & 1.2M & 1.1M & \textcolor{red}{$\approx 1M$}\footnote{Exact value: 1,048,576}  & - & - & - & -\\
+	  \textit{Induced inflation} & 5.281\textcolor{red}{$x$} & 1.625\textcolor{red}{$x$} & 1.250\textcolor{red}{$x$} & 1.125\textcolor{red}{$x$} & 1.063\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$} & - & - & - & -\\
+	  \textit{Prove time} & 14s & 28s & 56s & 120s & 262s & 541s & - & - & - & -\\
+	  \textit{Sample size} & 25\% & 50\% & 70\% & 80\% & 100\% & 100\% & - & - & - & -\\
+	  \textit{Blob size} & 19kb & 37kb & 52kb & 88kb &158kb & 298kb & - & - & - & -\\
+   	\end{tabular}
+   	\end{adjustbox}
+   	\end{minipage}
+    \caption{Memory requirements per segment size for a 1M cycles guest}
+  \end{center}
+\end{table}
+
+% 2.5m
+\par \noindent
+\textbf{Round 2}: up to \textit{2.5m} cycles\\
+User cycles: \textit{1,820,543}\\
+Inflation method: write 23k u32 numbers to the guest\\
+The results are displayed on the following table:
+\begin{table}[H]
+  	\begin{center}
+    \label{tab:table3}
+    \begin{minipage}{\textwidth}
+    \begin{adjustbox}{width=\textwidth}
+    \begin{tabular}{c|c|c|c|c|c|c|c|c|c|c}
+	  \textit{Segment size} & $2^{15}$ & $2^{16}$ & $2^{17}$ & $2^{18}$ & $2^{19}$ & $2^{20}$ & $2^{21}$ & $2^{22}$ & $2^{23}$ & $2^{24}$\\
+	  \textit{\# Segments} & 333 & 53 & 20 & 9 & 5 & 3 & 1 & - & - & -\\
+	  \textit{Total cycles} & 11m & 3.5m & 2.6m & 2.4m & 2.2m & 2.2m & \textcolor{red}{$\approx 2.1m$}\footnote{Exact value: 2,097,152} & - & - & -\\
+	  \textit{Induced inflation} & 5.203\textcolor{red}{$x$} & 1.656\textcolor{red}{$x$} & 1.250\textcolor{red}{$x$} & 1.125\textcolor{red}{$x$} & 1.063\textcolor{red}{$x$} & 1.031\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$} & - & - & -\\
+	  \textit{Prove time} & 14s & 29s & 58s & 123s & 262s & 540s & - & - & - & -\\
+	  \textit{Sample size} & 15\% & 40\% & 50\% & 50\% & 70\% & 100\% & - & - & - & -\\
+	  \textit{Blob size} & 19kb & 35kb & 52kb & 88kb &158kb & 299kb & 581kb & - & - & -\\
+   	\end{tabular}
+   	\end{adjustbox}
+   	\end{minipage}
+    \caption{Memory requirements per segment size for a 2.5M cycles guest}
+  \end{center}
+\end{table}
+
+% 5m
+\par \noindent
+\textbf{Round 3}: up to \textit{5m} cycles\\
+User cycles: \textit{3,637,543}\\
+Inflation method: write 46k u32 numbers to the guest\\
+The results are displayed on the following table:
+\begin{table}[H]
+  	\begin{center}
+    \label{tab:table4}
+    \begin{minipage}{\textwidth}
+    \begin{adjustbox}{width=\textwidth}
+    \begin{tabular}{c|c|c|c|c|c|c|c|c|c|c}
+	  \textit{Segment size} & $2^{15}$ & $2^{16}$ & $2^{17}$ & $2^{18}$ & $2^{19}$ & $2^{20}$ & $2^{21}$ & $2^{22}$ & $2^{23}$ & $2^{24}$\\
+	  \textit{\# Segments} & 647 & 105 & 40 & 18 & 9 & 4 & 2 & 1 & - & -\\
+	  \textit{Total cycles} & 21.2m & 6.9m & 5.2m & 4.6m & 4.3m & 4.2m & 4.2m & \textcolor{red}{$\approx 4.2m$}\footnote{Exact value: 4,194,304} & - & -\\
+	  \textit{Induced inflation} & 5.055\textcolor{red}{$x$} & 1.641\textcolor{red}{$x$} & 1.234\textcolor{red}{$x$} & 1.094\textcolor{red}{$x$} & 1.031\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$} & - & -\\
+	  \textit{Prove time} & 13s & 28s & 57s & 120s & 249s & 536s & - & - & - & -\\
+	  \textit{Sample size} & 2.5\% & 15\% & 20\% & 25\% & 30\% & 75\% & - & - & - & -\\
+	  \textit{Blob size} & 19kb & 35kb & 52kb & 88kb &158kb & 301kb & 581kb & 1.1mb & - & -\\
+   	\end{tabular}
+   	\end{adjustbox}
+   	\end{minipage}
+    \caption{Memory requirements per segment size for a 5M cycles guest}
+  \end{center}
+\end{table}
+
+% 10m
+\par \noindent
+\textbf{Round 4}: up to \textit{10m} cycles\\
+User cycles: \textit{7,271,543}\\
+Inflation method: write 92k u32 numbers to the guest\\
+The results are displayed on the following table:
+\begin{table}[H]
+  	\begin{center}
+    \label{tab:table5}
+    \begin{minipage}{\textwidth}
+    \begin{adjustbox}{width=\textwidth}
+    \begin{tabular}{c|c|c|c|c|c|c|c|c|c|c}
+	  \textit{Segment size} & $2^{15}$ & $2^{16}$ & $2^{17}$ & $2^{18}$ & $2^{19}$ & $2^{20}$ & $2^{21}$ & $2^{22}$ & $2^{23}$ & $2^{24}$\\
+	  \textit{\# Segments} & 1,278 & 209 & 78 & 35 & 17 & 8 & 4 & 2 & 1 & -\\
+	  \textit{Total cycles} & 41.9m & 13.7m & 10.2m & 9.2m & 8.7m & 8.4m & 8.4m & 8.4m & \textcolor{red}{$\approx 8.4m$}\footnote{Exact value: 8,388,608} & -\\
+	  \textit{Induced inflation} & 4.992\textcolor{red}{$x$} & 1.633\textcolor{red}{$x$} & 1.219\textcolor{red}{$x$} & 1.094\textcolor{red}{$x$} & 1.031\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$} & -\\
+	  \textit{Prove time} & 14s & 29s & 57s & 119s & 248s & 539s & - & - & - & -\\
+	  \textit{Sample size} & 3\% & 10\% & 15\% & 15\% & 20\% & 30\% & - & - & - & -\\
+	  \textit{Blob size} & 19kb & 37kb & 52kb & 88kb &158kb & 299kb & 581kb & 1.2mb & 2.2mb & -\\
+   	\end{tabular}
+   	\end{adjustbox}
+   	\end{minipage}
+    \caption{Memory requirements per segment size for a 10M cycles guest}
+  \end{center}
+\end{table}
+
+% 20m
+\par \noindent
+\textbf{Round 5}: up to \textit{20m} cycles\\
+User cycles: \textit{15,013,543}\\
+Inflation method: write 190k u32 numbers to the guest\\
+The results are displayed on the following table:
+\begin{table}[H]
+  	\begin{center}
+    \label{tab:table6}
+    \begin{minipage}{\textwidth}
+    \begin{adjustbox}{width=\textwidth}
+    \begin{tabular}{c|c|c|c|c|c|c|c|c|c|c}
+	  \textit{Segment size} & $2^{15}$ & $2^{16}$ & $2^{17}$ & $2^{18}$ & $2^{19}$ & $2^{20}$ & $2^{21}$ & $2^{22}$ & $2^{23}$ & $2^{24}$\\
+	  \textit{\# Segments} & 2,616 & 429 & 161 & 71 & 34 & 17 & 9 & 5 & 3 & 1\\
+	  \textit{Total cycles} & 85.7m & 28.1m & 21m & 18.6m & 17.8m & 17.3m & 17m & 16.9m & 16.8m & \textcolor{red}{$\approx 16.8m$}\footnote{Exact value: 16,777,216}\\
+	  \textit{Induced inflation} & 5.109\textcolor{red}{$x$} & 1.676\textcolor{red}{$x$} & 1.254\textcolor{red}{$x$} & 1.109\textcolor{red}{$x$} & 1.063\textcolor{red}{$x$} & 1.031\textcolor{red}{$x$}  & 1.016\textcolor{red}{$x$} & 1.008\textcolor{red}{$x$} & 1.004\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$}\\
+	  \textit{Prove time} & 14s & 29s & 59s & 121s & 251s & 539s & - & - & - & -\\
+	  \textit{Sample size} & 1\% & 5\% & 10\% & 10\% & 10\% & 15\% & - & - & - & -\\
+	  \textit{Blob size} & 19kb & 37kb & 52kb & 88kb & 158kb & 299kb & 581kb & 1.2mb & 2.3mb & 4.5m\\
+   	\end{tabular}
+   	\end{adjustbox}
+   	\end{minipage}
+    \caption{Memory requirements per segment size for a 20M cycles guest}
+  \end{center}
+\end{table}
+
+% 45m
+\par \noindent
+\textbf{Round 6}: up to \textit{45m} cycles\\
+User cycles: \textit{32,390,116}\\
+Inflation method: write 400k u32 numbers to the guest\\
+The results are displayed on the following table:
+\begin{table}[H]
+  	\begin{center}
+    \label{tab:table7}
+    \begin{minipage}{\textwidth}
+    \begin{adjustbox}{width=\textwidth}
+    \begin{tabular}{c|c|c|c|c|c|c|c|c|c|c}
+	  \textit{Segment size} & $2^{15}$ & $2^{16}$ & $2^{17}$ & $2^{18}$ & $2^{19}$ & $2^{20}$ & $2^{21}$ & $2^{22}$ & $2^{23}$ & $2^{24}$\\
+	  \textit{\# Segments} & 7,187 & 1,019 & 379 & 168 & 80 & 39 & 20 & 10 & 5 & 3\\
+	  \textit{Total cycles} & 235.5m & 66.8m & 49.7m & 44m & 41.7m & 40.9m & 40.1m & 39.8m & 41.9m & \textcolor{red}{$\approx 41.9m$}\footnote{Exact value: 41,943,040}\\
+	  \textit{Induced inflation} & 5.615\textcolor{red}{$x$} & 1.592\textcolor{red}{$x$} & 1.184\textcolor{red}{$x$} & 1.050\textcolor{red}{$x$} & 0.994\textcolor{red}{$x$} & 0.975\textcolor{red}{$x$} & 0.956\textcolor{red}{$x$} & 0.950\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$}\\
+	  \textit{Prove time} & 15s & 30s & 58s & 119s & 245s & 541s & - & - & - & -\\
+	  \textit{Sample size} & 0.1\% & 2.5\% & 5\% & 5\% & 5\% & 10\% & - & - & - & -\\
+	  \textit{Blob size} & 20kb & 36kb & 67kb & 133kb & 265kb & 528kb & 1.1mb & 1.7mb & 2.8mb & 5.2mb\\
+   	\end{tabular}
+   	\end{adjustbox}
+   	\end{minipage}
+    \caption{Memory requirements per segment size for a 45M cycles guest}
+  \end{center}
+\end{table}
+
+% 90m
+\par \noindent
+\textbf{Round 7}: up to \textit{90m} cycles\\
+User cycles: \textit{65,563,120}\\
+Inflation method: write 800k u32 numbers to the guest\\
+The results are displayed on the following table:
+\begin{table}[H]
+  	\begin{center}
+    \label{tab:table8}
+    \begin{minipage}{\textwidth}
+    \begin{adjustbox}{width=\textwidth}
+    \begin{tabular}{c|c|c|c|c|c|c|c|c|c|c}
+	  \textit{Segment size} & $2^{15}$ & $2^{16}$ & $2^{17}$ & $2^{18}$ & $2^{19}$ & $2^{20}$ & $2^{21}$ & $2^{22}$ & $2^{23}$ & $2^{24}$\\
+	  \textit{\# Segments} & 16,808 & 2,174 & 801 & 355 & 168 & 82 & 41 & 20 & 10 & 5\\
+	  \textit{Total cycles} & 551m & 142.5m & 105m & 92.9m & 87.8m & 85.5m & 84.4m & 83.9m & 83.9m & \textcolor{red}{$\approx 83.9m$}\footnote{Exact value: 83,886,080}\\
+	  \textit{Induced inflation} & 6.566\textcolor{red}{$x$} & 1.698\textcolor{red}{$x$} & 1.252\textcolor{red}{$x$} & 1.107\textcolor{red}{$x$} & 1.047\textcolor{red}{$x$} & 1.019\textcolor{red}{$x$} & 1.006\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$}\\
+	  \textit{Prove time} & 14s & 28s & 58s & 119s & 249s & 534s\footnote{low value is due to small sample size} & - & - & - & -\\
+	  \textit{Sample size} & 0.1\% & 2.5\% & 5\% & 5\% & 5\% & 3\% & - & - & - & -\\
+	  \textit{Blob size} & 19kb & 38kb & 67kb & 133kb & 265kb & 529kb & 1.1mb & 2mb & 4.1mb & 6.4mb\\
+   	\end{tabular}
+   	\end{adjustbox}
+   	\end{minipage}
+    \caption{Memory requirements per segment size for a 90M cycles guest}
+  \end{center}
+\end{table}
+
+%180m
+\par \noindent
+\textbf{Round 8}: up to \textit{180m} cycles\\
+User cycles: \textit{131,908,988}\\
+Inflation method: write 1.6m u32 numbers to the guest\\
+The results are displayed on the following table: 
+\begin{table}[H]
+  	\begin{center}
+    \label{tab:table9}
+    \begin{minipage}{\textwidth}
+    \begin{adjustbox}{width=\textwidth}
+    \begin{tabular}{c|c|c|c|c|c|c|c|c|c|c}
+	  \textit{Segment size} & $2^{15}$ & $2^{16}$ & $2^{17}$ & $2^{18}$ & $2^{19}$ & $2^{20}$ & $2^{21}$ & $2^{22}$ & $2^{23}$ & $2^{24}$\\
+	  \textit{\# Segments} & 36,046 & 4,483 & 1,643 & 727 & 344 & 167 & 83 & 41 & 21 & 11\\
+	  \textit{Total cycles} & 1.18b & 293.8m & 215.4m & 190.6m & 180.1m & 175.1m & 173m & 172m & 172m & \textcolor{red}{$\approx 172m$}\footnote{Exact value: 171,966,464}\\
+	  \textit{Induced inflation} & 6.869\textcolor{red}{$x$} & 1.708\textcolor{red}{$x$} & 1.252\textcolor{red}{$x$} & 1.108\textcolor{red}{$x$} & 1.047\textcolor{red}{$x$} & 1.018\textcolor{red}{$x$} & 1.006\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$}\\
+	  \textit{Prove time} & 15s & 29s & 66s & 124s & 257s & 544s & - & - & - & -\\
+	  \textit{Sample size} & 0.1\% & 2.5\% & 5\% & 5\% & 5\% & 2\% & - & - & - & -\\
+	  \textit{Blob size} & 19kb & 35kb & 67kb & 133kb & 265kb & 529kb & 1.1mb & 2mb & 4.1mb & 7.4mb\\
+   	\end{tabular}
+   	\end{adjustbox}
+   	\end{minipage}
+    \caption{Memory requirements per segment size for a 180M cycles guest}
+  \end{center}
+\end{table}
+
+\section*{Conclusion}
+This note investigated a scenario where a Risc0 guest program gets inflated with random inputs. 8 rounds of tests were conduced on segmentation and individual segment proving with a focus on systems whose memory are capped at 8GB. The results point to sweet spots on $2^{18}$ and $2^{19}$ segment size limits where parallelized proving setups could be employed to prove prohibitively large programs quickly with acceptable overhead and inflation in total cycles.
+
+
+\end{document}
