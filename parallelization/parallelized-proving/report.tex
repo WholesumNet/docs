@@ -1,0 +1,109 @@
+\documentclass[a4paper, 10pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{dcolumn}
+\usepackage{xcolor}
+\usepackage{adjustbox}
+\usepackage{indentfirst}
+\usepackage{adjustbox}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{url}
+\usepackage[colorlinks=true, linkcolor=blue, urlcolor=blue]{hyperref}
+
+\begin{document}
+
+\title{Parallel Proving of zkVM Programs On Computationally Weak Nodes; A Risc0 and Swarm Case Study}
+\author{
+	\small{Reza Hasanzadeh}\\
+	\footnotesize{\href{https://github.com/WholesumNet}{Wholesum Network}}\\	
+	\href{mailto:rezahsnz@proton.me}{\footnotesize{rezahsnz@proton.me}}
+}
+\date{\footnotesize{July 18th, 2024}}
+\maketitle
+
+\section{Introduction}
+zkVMs provide execution correctness guarantee for programs they run. The output of a zkVM program is accompanied with proofs that allow independent entities to verify if the execution was as expected. This guarantee comes with expensive costs though. A typical zkVM program is at least 10x slower compared to its unverified native execution. There are critical settings however that justify the incurred additional costs. ETH L2 zkRollups realm is a scalability example where verification guarantees secure the movement of billions of dollars. Verifiable computing, bearing significant computational overhead, requires strong local computers. And by strong, we mean high-end GPUs or server-scale CPUs. Given the in-feasibility of owning such devices and hoping to capitalize on this booming technology, there has been an influx of (decentralized) prover/GPU markets where users are incentivized to rent their computers out in exchange for money. Decentralized shared sequencers, general verifiable computing, and zkML are among the most sought subjects when looking for justifications to run zkVM compute networks. There also exists general compute networks where strong nodes are provided, but no verification tools are available and users have to customize the computation pipeline themselves in order to benefit from verifiable computing. These networks are usually designed for scientific computing or rendering and are among the oldest compute networks in existence.
+\par
+Decentralized storage networks(dStorage from now on), e.g. Swarm, are another type of distributed computing networks where the sole goal is to rent storage space out and make money. Compared to GPU markets, these networks rely on humbly weak nodes to serve users. The typical computational burden for a dStorage node is to wake up from time to time and sync itself with the network. This leads to relaxed minimum system requirements for nodes to join dStorage networks. Nodes often sport fast SSDs, but old CPUs, and lack GPUs. Even with such weak computational power, they are idle half of the time. This situation raises an interesting engineering question: is it possible to push overall node utilization to 99\% and what kind of computing we expect to carry out on a set of computationally weak machines? It turns out that there might be an opportunity to form a network off such storage-maxi nodes and task them with proving zkVM programs in a parallel manner.
+
+\section{Risc0}
+\href{https://www.risczero.com}{Risc0} is a zkVM that enables arbitrary(well, to some extent) rust programs' execution to be verifiable. A given Rust program first gets compiled into a RISC-V ELF binary whose entire execution trace is then fed to the zkSTARK circuitry of Risc0 to produce a prove-ready executable program. On the code level, Risc0 divides a zkVM application into two parts: \textit{host}, the native untrusted, and \textit{guest}, the provable enclave. The host loads and prepares the environment(I/O handling, ...) for guest to be proven. Execution-wise, the host and the guest are unified into a single Rust executable. Subject to requirements, developers usually customize host's code to relay out generated proofs for independent verification. The actual proofs and the public output of the guest is wrapped inside a small object called \textit{receipt} that is the result of proving the guest. Receipts contain everything verifiers need to approve any guest's execution correctness. 
+\par
+\textit{Babybear}\footnote{$p=2^{31}-2^{27}+1$} field is used for proof generation in Risc0. This choice imposes caps on how many instructions can be proved in one go. The limit is set to be $2^{24}$ \textit{cycles}\footnote{A cycle is equivalent to one or two RISC-V operations.}. To overcome this limitation, Risc0 came up with the idea of \textit{continuations} where infinitely-sized guests are possible. Continuations build on the idea of dividing guest into \textit{segments} with the segment size capped at $2^{24}$ cycles. With continuations, therefore, there is no limit on the number of segments and thus guest program size can grow to infinity. Large programs are usually composed of several segments and to prove them, each segment is proved individually and the final proof is obtained once all segments are proved. Developers can set segment size to lower limits too. The acceptable range is $2^{13}\approx 8k$ to $2^{24}\approx 16m$ cycles. Picking a large limit results in fewer segments but big memory requirements, while lower limits introduce excessive memory mapping to keep things consistent. So, choosing the right limit needs proper justification. Table 1 lists segment size limits and their memory requirements.
+\begin{table}[h!]
+  \begin{center}
+    \footnotesize
+    \label{tab:table1}
+    \begin{tabular}{c|c}
+	  \textbf{Segment size} & \textbf{Minimum required memory}\\
+	  \textit{cycles} & \textit{$\approx$ amount}\\
+	  \hline
+	  $2^{13} \approx 8k$  & 64 MB\\
+	  \textcolor{gray}{$2^{14} \approx 16k$} & \textcolor{gray}{128 MB}\\
+      $2^{15} \approx 32k$ & 256 MB\\
+      \textcolor{gray}{$2^{16} \approx 64k$} & \textcolor{gray}{512 MB}\\
+      $2^{17} \approx 128k$ & 1 GB\\
+      \textcolor{gray}{$2^{18} \approx 256k$} & \textcolor{gray}{2 GB}\\
+      $2^{19} \approx 512k$ & 4 GB\\
+      \textcolor{gray}{$2^{20} \approx 1M$} & \textcolor{gray}{8 GB}\\
+      $2^{21} \approx 2M$ & 16 GB\\
+      \textcolor{gray}{$2^{22} \approx 4M$} & \textcolor{gray}{32 GB}\\
+      $2^{23} \approx 8M$ & 64 GB\\
+      \textcolor{gray}{$2^{24} \approx 16M$} & \textcolor{gray}{128 GB}\\
+    \end{tabular}
+    \caption{Memory requirements per segment size}
+  \end{center}
+\end{table}
+
+\section{Swarm network}
+\href{https://www.ethswarm.org/}{Swarm network} is a dStorage platform. Its main goal is to provide a p2p storage solution with privacy, resiliency, and availability promises. Being a network, Swarm, is formed by nodes that provide their storage space in exchange for money. Content that needs to be stored, is divided into 4 KB chunks, encrypted, and sent to nodes for storage. A JPG file, for example, ends up being stored by hundreds of nodes(each node stores some chunks) in a redundant manner to maximize protection against single points of failure. Swarm follows content addressing model of storage where CIDs\footnote{Content Identifier} that are derived from a \textit{merklized} variant of chunked layout of content are used for retrieval; \textit{lose CID, adios content}.
+\par
+Swarm, puts relaxed requirements for node participation. This is typical of all dStorage platforms as well. To join Swarm, a node needs to have at least 4 GB of memory, a dual core CPU and is encouraged to sport a SSD drive. This setup is more than enough to join dStorage, because the act of storage is not computationally intensive. A node's typical contribution is to wake up from time to time, do some syncing(store new content, prove the storage of old content, house keeping, ...), and go back to sleep. It can be argued that nodes are usually idle half of their dStorage time. 
+\par
+As of July 2024, Swarm has more than \href{https://swarmscan.io/stats/availability}{15,000 active nodes}. Ideally, 15,000 half time idle nodes translate to 7,500 completely idle nodes when viewed as a whole. Given the minimum system requirements to join, the average TFLOPS of a Swarm node is estimated to be around 0.2 TFLOPS. The combined total computational capacity of Swarm, therefore, hovers around 3,000 TFLOPS. When Swarm is viewed as a mere computational network, it can emulate 35 RTX 4090\footnote{NVIDIA RTX 4090, with 82 TFLOPS of compute power, is indeed a heavy duty GPU.} GPUs, while when treated as a hybrid storage-compute network its computational capacity is halved and can only emulate 17 RTX 4090 GPUs. This is an idealistic deduction though, and the amount of latency and noise typical of p2p networks drags the actual value much lower. 
+\section{Parallel proving}
+Risc0 zkVM programs require upper middle or high-end GPUs for production-ready fast proving. Mobilization of such hardware into a network form is complex. There needs to be a strong set of monetary incentives for participants to put their gadgets at work. No demand and the network faces exodus. Low demand and starvation is a problem. It is only when the demand is high that the network reaches a sustainable state. dStorage, on the other hand, is easier to approach because nodes are already \textit{storage-maxi}: have some tasks to do, and have accepted staying half idle as their fate. But given the demanding nature of zkVM proving, assigning a functional role to (computationally weak) storage-maxi nodes seem euphoric unless a robust distributed and parallel proving design is employed.
+\par
+The hack is to limit segment size of guests to a value that is friendly to storage-maxi nodes of Swarm. Here we assume that nodes have at least 8 GB of memory. Of all segment size limits shown on Table 1, values up to $2^{19}$ seem to be good choices because the amount of memory required for proving respective segments stay below 4 GB. Nodes are already running an operating system with some resident services so they would need some free memory to stay responsive to new events. The 4 GB limit guarantees that nodes stay storage solvent while being open to outstanding zkVM compute tasks. We have experimented with various guest program sizes and how they react to different segment size limits in terms of overhead and other side effects. The complete results are available \href{https://github.com/WholesumNet/docs/blob/main/parallelization/segmentation/report/report.pdf}{here}. Borrowed from the report is Table 2 where a 90M cycles program gets segmented with various limits.
+\begin{table}[H]
+  	\begin{center}
+    \label{tab:table8}
+    \begin{minipage}{\textwidth}
+    \begin{adjustbox}{width=\textwidth}
+    \begin{tabular}{c|c|c|c|{\columncolor[gray]{0.8}}c|c|c|c|c|c|c}
+	  \textit{Segment size} & $2^{15}$ & $2^{16}$ & $2^{17}$ & $2^{18}$ & $2^{19}$ & $2^{20}$ & $2^{21}$ & $2^{22}$ & $2^{23}$ & $2^{24}$\\
+	  \textit{\# Segments} & 16,808 & 2,174 & 801 & 355 & 168 & 82 & 41 & 20 & 10 & 5\\
+	  \textit{Total cycles} & 551m & 142.5m & 105m & 92.9m & 87.8m & 85.5m & 84.4m & 83.9m & 83.9m & \textcolor{red}{$\approx 83.9m$}\footnote{Exact value: 83,886,080}\\
+	  \textit{Induced inflation} & 6.566\textcolor{red}{$x$} & 1.698\textcolor{red}{$x$} & 1.252\textcolor{red}{$x$} & 1.107\textcolor{red}{$x$} & 1.047\textcolor{red}{$x$} & 1.019\textcolor{red}{$x$} & 1.006\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$} & 1.000\textcolor{red}{$x$}\\
+	  \textit{Prove time} & 14s & 28s & 58s & 119s & 249s & 534s\footnote{low value is due to small sample size} & - & - & - & -\\
+	  \textit{Sample size} & 0.1\% & 2.5\% & 5\% & 5\% & 5\% & 3\% & - & - & - & -\\
+	  \textit{Blob size} & 19kb & 38kb & 67kb & 133kb & 265kb & 529kb & 1.1mb & 2mb & 4.1mb & 6.4mb\\
+   	\end{tabular}
+   	\end{adjustbox}
+   	\end{minipage}
+    \caption{Memory requirements per segment size for a 90M cycles guest}
+  \end{center}
+\end{table}
+Focusing on the $2^{19}$ column, we need to prove 168 segments where it takes 249 seconds to prove each segment on a typical 10 year old laptop\footnote{Lenovo Thinkpad e450(Intel Core i7 5500U(2C 4T), 16GB RAM)}. Now if we were to set the segment limit to the highest value(i.e. $2^{24}$) and prove it on the \underline{same machine}, we would have needed 128 GB of memory and wait for 15 hours. Segmentation of the guest into many segments and \textit{paralleled proving}, if available, results in 200x speedup compared to solo proving. In reality, however, those who need to prove such big zkVM programs almost always rent strong cloud computers. 
+\par
+To prove the 90M cycles example program of Table 2 in 249 seconds via Swarm network nodes, we need to have at least $168 \times 5 = 840$ ready nodes. This redundancy is due to the fact that p2p networks are a hotbed of noise. And by setting signal to noise ratio to 1:4(four time wasters nodes for every get-the-job-done one), we can effectively guard against time waster. Swarm with its fleet of 15,000 nodes is thus capable of proving 17 90M cycles programs simultaneously. 17 is obtained when latency is assumed to be 0 seconds, while on reality it is way longer. To exact capability of Swarm for zkVM proving is yet to be measured and this has many things to do with the actual protocol design of parallel proving.
+\par
+Another point of interest on Table 2 is the \textit{Blob size} row. When segmenting a guest in Risc0, each segment is a binary object that is going to be sent to the network for proving. Once a segment is ready, the protocol can dispatch it to nodes over the network and wait for results. Each prove result, is then verified by the protocol individually. The final proof is the aggregation of all proved segments and this is what the protocol sends to the client as the final result of the whole prove job. A complete flow of a prove job is as follows:
+\begin{itemize}
+    \item[\textcolor{gray}{I}] Segment the guest into \textit{G} items
+    \item[\textcolor{gray}{II}] Store all segment blobs on Swarm and obtain CIDs
+    \item[\textcolor{gray}{III}] Dispatch segments(CIDs actually) to the network for proving
+    \item[\textcolor{gray}{IV}] Wait for all segments to be proved and verify them individually
+    \item[\textcolor{gray}{V}] Combine all proofs into a final proof and verify it
+    \item[\textcolor{gray}{VI}] Deliver the result to the client
+\end{itemize}
+Note that the redundancy guard introduces no additional storage overheads. It is only the actual proving that may be carried out excessively. The segment blobs are stored once and retrieved many times. It is the CID of the blobs that are sent around and this is by design. Sending large objects is not feasible in p2p settings. The $2^{19}$ segment size limit on Table 2, for example, results in 168 blobs of 265 KB blobs. A message with 265 KB as payload size is prohibitively large by any standard, so we need to restrain messages to only carry CIDs. 
+\par
+Choosing smaller segment limit sizes is a possibility too. But we should keep in mind that as the number of segments grow, the quality of the dispatch and combine parallel proving algorithm may reduce. Recovering such big proofs as 355 in the case of $2^{18}$ segment limit size is a complex stress test for any network. The actual values for network parameters need to be tested on the battlefield and evolved into a sustainable set of parameters.
+
+\section{ETH L2 sequencer decentralization}
+
+\section{Verifiable performance benchmarks}
+
+\section*{Conclusion}
+\end{document}
